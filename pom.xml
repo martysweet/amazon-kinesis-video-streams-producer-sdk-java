@@ -161,7 +161,7 @@
                     <archive>
                         <manifest>
                             <!-- Jar file entry point -->
-                            <mainClass>com.amazonaws.kinesisvideo.demoapp.DemoAppMain</mainClass>
+                            <mainClass>com.amazonaws.kinesisvideo.demoapp.PutMediaDemo</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
@@ -171,7 +171,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>com.amazonaws.kinesisvideo.demoapp.DemoAppMain</mainClass>
+                            <mainClass>com.amazonaws.kinesisvideo.demoapp.PutMediaDemo</mainClass>
                         </manifest>
                     </archive>
                     <descriptorRefs>
