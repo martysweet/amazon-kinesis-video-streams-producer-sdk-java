@@ -67,6 +67,7 @@ public final class PutMediaDemo {
         if(runningDemo == null){
             System.out.println("runningDemo is NULL, recreating");
             runningDemo = new PutMediaDemo();
+            runningDemo.setupResources();
         }
 
         if(input.getAction().toUpperCase().equals("STOP")){
@@ -80,7 +81,10 @@ public final class PutMediaDemo {
     }
 
     public PutMediaDemo() {
+        // Do nothing, Lambda calls this then starting the container
+    }
 
+    private void setupResources() {
         System.out.println("Setting up PutMediaDemo");
 
         // Setup auth client
@@ -108,14 +112,20 @@ public final class PutMediaDemo {
         dataClient = null;
     }
 
-    public void start(String channelId) throws Exception {
-        stop();
+    public void start(String channelId) {
 
-        // Create a input stream from TVHeadend
-        String urlChan = INPUT_STREAM + channelId;
-        System.out.println("Starting Stream on " + urlChan);
-        URL url = new URL(urlChan);
-        final InputStream inputStream = url.openStream();
+
+        InputStream inputStream;
+        try {
+            // Create a input stream from TVHeadend
+            String urlChan = INPUT_STREAM + channelId;
+            System.out.println("Starting Stream on " + urlChan);
+            URL url = new URL(urlChan);
+            inputStream = url.openStream();
+        }catch (Exception e){
+            System.out.println("An error occurred opening the stream. Aborting. " + e.getMessage());
+            return;
+        }
 
 
         /* PutMedia client */
