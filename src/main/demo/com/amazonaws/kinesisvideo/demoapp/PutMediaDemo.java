@@ -1,5 +1,8 @@
 package com.amazonaws.kinesisvideo.demoapp;
 
+import com.amazonaws.auth.AWSCredentialsProviderChain;
+import com.amazonaws.auth.BasicSessionCredentials;
+import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
 import com.amazonaws.kinesisvideo.demoapp.auth.AuthHelper;
 import com.amazonaws.services.kinesisvideo.AmazonKinesisVideo;
 import com.amazonaws.services.kinesisvideo.AmazonKinesisVideoAsyncClient;
@@ -10,6 +13,7 @@ import com.amazonaws.services.kinesisvideo.model.AckEvent;
 import com.amazonaws.services.kinesisvideo.model.FragmentTimecodeType;
 import com.amazonaws.services.kinesisvideo.model.GetDataEndpointRequest;
 import com.amazonaws.services.kinesisvideo.model.PutMediaRequest;
+import com.amazonaws.services.lambda.runtime.Context;
 
 import java.io.FileInputStream;
 import java.io.InputStream;
@@ -18,6 +22,7 @@ import java.net.URL;
 import java.time.Instant;
 import java.util.Date;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 
 /**
@@ -43,91 +48,112 @@ import java.util.concurrent.CountDownLatch;
  */
 public final class PutMediaDemo {
     private static final String DEFAULT_REGION = "eu-west-1";
-    private static final String PUT_MEDIA_API = "/putMedia";
 
-    /* the name of the stream */
     private static final String STREAM_NAME = "south1";
 
-    private static final String INPUT_STREAM = "http://x.x.x.x:9981/stream/channel/e9ac808609ab4989a56cd61c34dfbf25";
+    private static final String INPUT_STREAM = "http://127.0.0.1:9981/stream/channel/";
 
-    /* sample MKV file */
-    private static final String MKV_FILE_PATH = "src/main/resources/data/mkv/clusters.mkv";
-
-    /* max upload bandwidth */
-    private static final long MAX_BANDWIDTH_KBPS = 15 * 1024L;
-
-    /* response read timeout */
-    private static final int READ_TIMEOUT_IN_MILLIS = 1_000_000;
-
-    /* connect timeout */
     private static final int CONNECTION_TIMEOUT_IN_MILLIS = 10_000;
 
-    private PutMediaDemo() { }
-    public static void main(final String[] args) throws Exception {
-        final AmazonKinesisVideo frontendClient = AmazonKinesisVideoAsyncClient.builder()
-                .withCredentials(AuthHelper.getSystemPropertiesCredentialsProvider())
+    private static final DefaultAWSCredentialsProviderChain creds = new DefaultAWSCredentialsProviderChain();
+
+    private static PutMediaDemo runningDemo = null;
+
+    private AmazonKinesisVideoPutMedia dataClient = null;
+    private AmazonKinesisVideo frontendClient;
+    private String dataEndpoint;
+
+    public static void main(Payload input, Context context) throws Exception {
+        if(runningDemo == null){
+            System.out.println("runningDemo is NULL, recreating");
+            runningDemo = new PutMediaDemo();
+        }
+
+        if(input.getAction().toUpperCase().equals("STOP")){
+            runningDemo.stop();
+        }else{
+            runningDemo.stop();
+            runningDemo.start(input.getAction());
+        }
+
+        System.out.println("FINISHED REQUEST SUCCESSFULLY");
+    }
+
+    public PutMediaDemo() {
+
+        System.out.println("Setting up PutMediaDemo");
+
+        // Setup auth client
+        frontendClient = AmazonKinesisVideoAsyncClient.builder()
+                .withCredentials(creds)
                 .withRegion(DEFAULT_REGION)
                 .build();
 
         /* this is the endpoint returned by GetDataEndpoint API */
-        final String dataEndpoint = frontendClient.getDataEndpoint(
+        dataEndpoint = frontendClient.getDataEndpoint(
                 new GetDataEndpointRequest()
                         .withStreamName(STREAM_NAME)
                         .withAPIName("PUT_MEDIA")).getDataEndpoint();
 
-        /* send the same MKV file over and over */
-        while (true) {
-            /* actually URI to send PutMedia request */
-            final URI uri = URI.create(dataEndpoint + PUT_MEDIA_API);
+    }
 
-            /* input stream for sample MKV file */
-            URL url = new URL(INPUT_STREAM);
-            final InputStream inputStream = url.openStream();
+    public void stop() throws Exception {
+        /* close the client */
+        System.out.println("Ensuring stream has stopped");
 
-            /* use a latch for main thread to wait for response to complete */
-            final CountDownLatch latch = new CountDownLatch(1);
-
-            /* PutMedia client */
-            final AmazonKinesisVideoPutMedia dataClient = AmazonKinesisVideoPutMediaClient.builder()
-                    .withRegion(DEFAULT_REGION)
-                    .withEndpoint(URI.create(dataEndpoint))
-                    .withCredentials(AuthHelper.getSystemPropertiesCredentialsProvider())
-                    .withConnectionTimeoutInMillis(CONNECTION_TIMEOUT_IN_MILLIS)
-                    .build();
-
-            final PutMediaAckResponseHandler responseHandler = new PutMediaAckResponseHandler()  {
-                @Override
-                public void onAckEvent(AckEvent event) {
-                    System.out.println("onAckEvent " + event);
-                }
-
-                @Override
-                public void onFailure(Throwable t) {
-                    latch.countDown();
-                    System.out.println("onFailure: " + t.getMessage());
-                    // TODO: Add your failure handling logic here
-                }
-
-                @Override
-                public void onComplete() {
-                    System.out.println("onComplete");
-                    latch.countDown();
-                }
-            };
-
-            /* start streaming video in a background thread */
-            dataClient.putMedia(new PutMediaRequest()
-                            .withStreamName(STREAM_NAME)
-                            .withFragmentTimecodeType(FragmentTimecodeType.RELATIVE)
-                            .withPayload(inputStream)
-                            .withProducerStartTimestamp(Date.from(Instant.now())),
-                    responseHandler);
-
-            /* wait for request/response to complete */
-            latch.await();
-
-            /* close the client */
+        if(dataClient != null) {
             dataClient.close();
         }
+
+        dataClient = null;
     }
+
+    public void start(String channelId) throws Exception {
+        stop();
+
+        // Create a input stream from TVHeadend
+        String urlChan = INPUT_STREAM + channelId;
+        System.out.println("Starting Stream on " + urlChan);
+        URL url = new URL(urlChan);
+        final InputStream inputStream = url.openStream();
+
+
+        /* PutMedia client */
+        dataClient = AmazonKinesisVideoPutMediaClient.builder()
+                .withRegion(DEFAULT_REGION)
+                .withEndpoint(URI.create(dataEndpoint))
+                .withCredentials(creds)
+                .withConnectionTimeoutInMillis(CONNECTION_TIMEOUT_IN_MILLIS)
+                .build();
+
+        final PutMediaAckResponseHandler responseHandler = new PutMediaAckResponseHandler()  {
+            @Override
+            public void onAckEvent(AckEvent event) {
+                System.out.println("onAckEvent " + event);
+            }
+
+            @Override
+            public void onFailure(Throwable t) {
+
+                System.out.println("onFailure: " + t.getMessage());
+                // TODO: Add your failure handling logic here
+            }
+
+            @Override
+            public void onComplete() {
+                System.out.println("onComplete");
+
+            }
+        };
+
+        /* start streaming video in a background thread */
+        dataClient.putMedia(new PutMediaRequest()
+                        .withStreamName(STREAM_NAME)
+                        .withFragmentTimecodeType(FragmentTimecodeType.RELATIVE)
+                        .withPayload(inputStream)
+                        .withProducerStartTimestamp(Date.from(Instant.now())),
+                responseHandler);
+
+        }
+
 }
